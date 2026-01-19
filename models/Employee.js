@@ -1,0 +1,49 @@
+import { DataTypes } from "sequelize";
+import sequelize from "../db.js";
+
+const Employee = sequelize.define(
+  "Employee",
+  {
+    employeeId: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      primaryKey: true,
+      unique: true,
+    },
+    firstName: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    lastName: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    address: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    role: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    image: {
+      type: DataTypes.STRING,
+      defaultValue: "/defaultProfile.png",
+    },
+    baseSalary: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+    },
+    allowances: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+    },
+    deductions: {
+      type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0,
+    },
+  },
+  { timestamps: true, tableName: "employees" }
+);
+
+export default Employee;
