@@ -69,6 +69,16 @@ const Payroll = sequelize.define(
       type: DataTypes.DECIMAL(10, 2),
       defaultValue: 0,
     },
+    customAllowances: {
+      type: DataTypes.JSON,
+      allowNull: false,
+      defaultValue: [],
+    },
+    customDeductions: {
+      type: DataTypes.JSON,
+      allowNull: false,
+      defaultValue: [],
+    },
     netSalary: {
       type: DataTypes.DECIMAL(10, 2),
       defaultValue: 0,

@@ -164,13 +164,36 @@ async function computeAttendanceAndOtBreakdown(employeeId, year, month) {
   };
 }
 
-function calculatePayrollFigures({ baseSalary, otPay, noPayDeduction, incentive }) {
+function sumCustomItems(items) {
+  if (!Array.isArray(items)) return 0;
+  return Number(
+    items
+      .reduce((sum, item) => {
+        const amount = Number(item && item.amount != null ? item.amount : 0);
+        if (Number.isNaN(amount)) return sum;
+        return sum + amount;
+      }, 0)
+      .toFixed(2)
+  );
+}
+
+function calculatePayrollFigures({
+  baseSalary,
+  otPay,
+  noPayDeduction,
+  incentive,
+  customAllowancesTotal = 0,
+  customDeductionsTotal = 0,
+}) {
   const base = Number(baseSalary || 0);
   const ot = Number(otPay || 0);
   const noPay = Number(noPayDeduction || 0);
   const inc = Number(incentive || 0);
 
-  const fullSalary = base + ot - noPay + inc;
+  const extraAllow = Number(customAllowancesTotal || 0);
+  const extraDed = Number(customDeductionsTotal || 0);
+
+  const fullSalary = base + ot - noPay + inc + extraAllow - extraDed;
   const epfDeduction = fullSalary * 0.08;
   const netSalary = fullSalary - epfDeduction;
 
@@ -189,6 +212,8 @@ export async function getEmployeePayroll(req, res) {
     const now = new Date();
     const year = req.query.year ? Number(req.query.year) : now.getFullYear();
     const month = req.query.month ? Number(req.query.month) : now.getMonth() + 1; // 1-12
+    const finalize =
+      req.query.finalize === "true" || req.query.finalize === "1" || req.query.finalize === 1;
 
     let incentive = 0;
     if (req.query.incentive != null) {
@@ -243,14 +268,77 @@ export async function getEmployeePayroll(req, res) {
       finalIncentive = Number(payroll.incentive || 0);
     }
 
+    // Handle custom allowances and deductions coming from the request.
+    // They are expected as JSON-encoded arrays in the query string.
+    let customAllowances = [];
+    let customDeductions = [];
+
+    const allowancesProvided = Object.prototype.hasOwnProperty.call(
+      req.query,
+      "allowances"
+    );
+    const deductionsProvided = Object.prototype.hasOwnProperty.call(
+      req.query,
+      "deductions"
+    );
+
+    if (allowancesProvided && typeof req.query.allowances === "string") {
+      try {
+        const parsed = JSON.parse(req.query.allowances);
+        if (Array.isArray(parsed)) {
+          customAllowances = parsed.map((item) => ({
+            label: String(item.label || "").slice(0, 100),
+            amount: Number(item.amount || 0),
+          }));
+        }
+      } catch (e) {
+        console.warn("Failed to parse custom allowances JSON", e);
+      }
+    }
+
+    if (deductionsProvided && typeof req.query.deductions === "string") {
+      try {
+        const parsed = JSON.parse(req.query.deductions);
+        if (Array.isArray(parsed)) {
+          customDeductions = parsed.map((item) => ({
+            label: String(item.label || "").slice(0, 100),
+            amount: Number(item.amount || 0),
+          }));
+        }
+      } catch (e) {
+        console.warn("Failed to parse custom deductions JSON", e);
+      }
+    }
+
+    // If not provided in the request, reuse any previously stored values
+    // for this payroll record (if it exists).
+    if (payroll) {
+      if (!allowancesProvided) {
+        customAllowances = payroll.customAllowances || [];
+      }
+      if (!deductionsProvided) {
+        customDeductions = payroll.customDeductions || [];
+      }
+    }
+
+    const customAllowancesTotal = sumCustomItems(customAllowances);
+    const customDeductionsTotal = sumCustomItems(customDeductions);
+
     const { fullSalary, epfDeduction, netSalary } = calculatePayrollFigures({
       baseSalary,
       otPay,
       noPayDeduction,
       incentive: finalIncentive,
+      customAllowancesTotal,
+      customDeductionsTotal,
     });
 
-    if (!payroll) {
+    if (finalize) {
+      // For finalization (from Download Paysheet), remove any existing
+      // payroll records for the same employee/year/month and create a
+      // fresh one with the latest values.
+      await Payroll.destroy({ where: { employeeId, year, month } });
+
       payroll = await Payroll.create({
         employeeId,
         year,
@@ -265,6 +353,28 @@ export async function getEmployeePayroll(req, res) {
         otPay: Number(otPay.toFixed(2)),
         noPayDeduction: Number(noPayDeduction.toFixed(2)),
         epfDeduction,
+        customAllowances,
+        customDeductions,
+        incentive: finalIncentive,
+        netSalary,
+      });
+    } else if (!payroll) {
+      payroll = await Payroll.create({
+        employeeId,
+        year,
+        month,
+        baseSalary,
+        totalWorkingHours: attendanceInfo.totalWorkingHours,
+        totalOtHours: attendanceInfo.totalOtHours,
+        annualLeaveDays: attendanceInfo.annualLeaveDays,
+        sickLeaveDays: attendanceInfo.sickLeaveDays,
+        noPayDays: attendanceInfo.noPayDays,
+        otRate: Number(normalOtRate.toFixed(2)),
+        otPay: Number(otPay.toFixed(2)),
+        noPayDeduction: Number(noPayDeduction.toFixed(2)),
+        epfDeduction,
+        customAllowances,
+        customDeductions,
         incentive: finalIncentive,
         netSalary,
       });
@@ -279,6 +389,8 @@ export async function getEmployeePayroll(req, res) {
       payroll.otPay = Number(otPay.toFixed(2));
       payroll.noPayDeduction = Number(noPayDeduction.toFixed(2));
       payroll.epfDeduction = epfDeduction;
+      payroll.customAllowances = customAllowances;
+      payroll.customDeductions = customDeductions;
       payroll.incentive = finalIncentive;
       payroll.netSalary = netSalary;
       await payroll.save();
@@ -288,6 +400,9 @@ export async function getEmployeePayroll(req, res) {
     payrollData.fullSalary = fullSalary;
     payrollData.epfDeduction = epfDeduction;
     payrollData.netSalary = netSalary;
+
+    payrollData.customAllowances = customAllowances;
+    payrollData.customDeductions = customDeductions;
 
     payrollData.normalOtHours = attendanceInfo.normalOtHours;
     payrollData.holidayOtHours = attendanceInfo.holidayOtHours;
@@ -347,11 +462,16 @@ export async function getEmployeePayrollHistory(req, res) {
     const items = payrolls.map((p) => {
       const plain = p.toJSON ? p.toJSON() : p;
 
+      const customAllowancesTotal = sumCustomItems(plain.customAllowances || []);
+      const customDeductionsTotal = sumCustomItems(plain.customDeductions || []);
+
       const figures = calculatePayrollFigures({
         baseSalary: plain.baseSalary,
         otPay: plain.otPay,
         noPayDeduction: plain.noPayDeduction,
         incentive: plain.incentive,
+        customAllowancesTotal,
+        customDeductionsTotal,
       });
 
       const { startDate, endDate } = getPayrollCycleRange(plain.year, plain.month);
