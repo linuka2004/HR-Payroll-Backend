@@ -375,36 +375,54 @@ export async function uploadAttendanceExcel(req, res) {
           otHours: 0,
         };
       } else {
-        // Present days must have valid in/out times
-        const checkInTime = parseTimeToDate(dateStr, row[inTimeIdx]);
-        const checkOutTime = parseTimeToDate(dateStr, row[outTimeIdx]);
+        // Working days normally require valid in/out times. If both are empty,
+        // treat the day as an unpaid "No Pay" day with zero hours instead of failing.
+        const rawIn = row[inTimeIdx];
+        const rawOut = row[outTimeIdx];
 
-        if (!checkInTime || !checkOutTime) {
-          throw new Error(`Invalid in time or out time on row ${i + 1}`);
+        const isEmptyCell = (v) =>
+          v == null || (typeof v === "string" && v.trim() === "");
+
+        if (isEmptyCell(rawIn) && isEmptyCell(rawOut)) {
+          payload = {
+            status: "No Pay",
+            dayType: finalDayType,
+            checkInTime: null,
+            checkOutTime: null,
+            workingHours: 0,
+            otHours: 0,
+          };
+        } else {
+          const checkInTime = parseTimeToDate(dateStr, rawIn);
+          const checkOutTime = parseTimeToDate(dateStr, rawOut);
+
+          if (!checkInTime || !checkOutTime) {
+            throw new Error(`Invalid in time or out time on row ${i + 1}`);
+          }
+
+          const diffMs = checkOutTime.getTime() - checkInTime.getTime();
+          if (diffMs < 0) {
+            throw new Error(`Out time is earlier than in time on row ${i + 1}`);
+          }
+
+          const workingHours = diffMs / (1000 * 60 * 60);
+
+          const { dayWorkingHours, otHours } = await calculateWorkingAndOtHours(
+            dateStr,
+            finalStatus,
+            finalDayType,
+            workingHours
+          );
+
+          payload = {
+            status: finalStatus,
+            dayType: finalDayType,
+            checkInTime,
+            checkOutTime,
+            workingHours: Number(dayWorkingHours.toFixed(2)),
+            otHours: Number(otHours.toFixed(2)),
+          };
         }
-
-        const diffMs = checkOutTime.getTime() - checkInTime.getTime();
-        if (diffMs < 0) {
-          throw new Error(`Out time is earlier than in time on row ${i + 1}`);
-        }
-
-        const workingHours = diffMs / (1000 * 60 * 60);
-
-        const { dayWorkingHours, otHours } = await calculateWorkingAndOtHours(
-          dateStr,
-          finalStatus,
-          finalDayType,
-          workingHours
-        );
-
-        payload = {
-          status: finalStatus,
-          dayType: finalDayType,
-          checkInTime,
-          checkOutTime,
-          workingHours: Number(dayWorkingHours.toFixed(2)),
-          otHours: Number(otHours.toFixed(2)),
-        };
       }
 
       if (existing) {

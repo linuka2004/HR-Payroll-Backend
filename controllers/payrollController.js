@@ -108,7 +108,15 @@ async function computeAttendanceAndOtBreakdown(employeeId, year, month) {
     } else if (rec.status === "Sick Leave") {
       sickLeaveDays += 1;
     } else if (rec.status === "No Pay") {
-      noPayDays += 1;
+      const isWeekend = rec.dayType === "Sunday";
+      const isMercantile = rec.dayType === "MercantileHoliday";
+      const isPublicHoliday = holidaySet.has(rec.date);
+
+      // Do NOT treat Sundays or holidays as no-pay days.
+      // Only count working days with "No Pay" status for salary deduction.
+      if (!isWeekend && !isMercantile && !isPublicHoliday) {
+        noPayDays += 1;
+      }
     }
 
     let isSpecialOtDay = false;
