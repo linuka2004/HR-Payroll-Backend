@@ -3,7 +3,7 @@ import Employee from "../models/Employee.js";
 function ensureAdmin(req) {
   const role = req.user && req.user.role ? String(req.user.role).toLowerCase() : null;
 
-  if (!role || role !== "admin") {
+  if (!role || (role !== "admin" && role !== "manager")) {
     const error = new Error("Forbidden");
     error.statusCode = 403;
     throw error;
@@ -14,11 +14,37 @@ export async function createEmployee(req, res) {
   try {
     ensureAdmin(req);
 
-    const { employeeId, firstName, lastName, address, role, image, baseSalary, allowances, deductions } = req.body;
+    const {
+      employeeId,
+      firstName,
+      lastName,
+      idNumber,
+      etfNumber,
+      telephone,
+      department,
+      address,
+      role,
+      image,
+      baseSalary,
+      allowances,
+      deductions,
+    } = req.body;
 
-    if (!employeeId || !firstName || !lastName || !address || !role || baseSalary == null) {
+    if (
+      !employeeId ||
+      !firstName ||
+      !lastName ||
+      !idNumber ||
+      !etfNumber ||
+      !telephone ||
+      !department ||
+      !address ||
+      !role ||
+      baseSalary == null
+    ) {
       res.status(400).json({
-        message: "employeeId, firstName, lastName, address, role and baseSalary are required",
+        message:
+          "employeeId, firstName, lastName, idNumber, etfNumber, telephone, department, address, role and baseSalary are required",
       });
       return;
     }
@@ -33,6 +59,10 @@ export async function createEmployee(req, res) {
       employeeId,
       firstName,
       lastName,
+      idNumber,
+      etfNumber,
+      telephone,
+      department,
       address,
       role,
       image,
@@ -101,7 +131,21 @@ export async function updateEmployee(req, res) {
     ensureAdmin(req);
 
     const { employeeId: paramEmployeeId } = req.params;
-    const { employeeId, firstName, lastName, address, role, image, baseSalary, allowances, deductions } = req.body;
+    const {
+      employeeId,
+      firstName,
+      lastName,
+      idNumber,
+      etfNumber,
+      telephone,
+      department,
+      address,
+      role,
+      image,
+      baseSalary,
+      allowances,
+      deductions,
+    } = req.body;
 
     const employee = await Employee.findOne({ where: { employeeId: paramEmployeeId } });
 
@@ -114,6 +158,10 @@ export async function updateEmployee(req, res) {
       employeeId,
       firstName,
       lastName,
+      idNumber,
+      etfNumber,
+      telephone,
+      department,
       address,
       role,
       image,

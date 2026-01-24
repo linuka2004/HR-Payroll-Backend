@@ -7,7 +7,7 @@ import Holiday from "../models/Holiday.js";
 function ensureAdmin(req) {
   const role = req.user && req.user.role ? String(req.user.role).toLowerCase() : null;
 
-  if (!role || role !== "admin") {
+  if (!role || (role !== "admin" && role !== "manager")) {
     const error = new Error("Forbidden");
     error.statusCode = 403;
     throw error;
@@ -416,6 +416,10 @@ export async function getEmployeePayroll(req, res) {
         employeeId: employee.employeeId,
         firstName: employee.firstName,
         lastName: employee.lastName,
+        etfNumber: employee.etfNumber,
+        idNumber: employee.idNumber,
+        telephone: employee.telephone,
+        department: employee.department,
         role: employee.role,
       },
       period: {
@@ -500,6 +504,10 @@ export async function getEmployeePayrollHistory(req, res) {
         employeeId: employee.employeeId,
         firstName: employee.firstName,
         lastName: employee.lastName,
+        etfNumber: employee.etfNumber,
+        idNumber: employee.idNumber,
+        telephone: employee.telephone,
+        department: employee.department,
         role: employee.role,
       },
       payrolls: items,

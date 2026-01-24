@@ -18,6 +18,22 @@ const Employee = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
     },
+    idNumber: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    etfNumber: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    telephone: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    department: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
     address: {
       type: DataTypes.STRING,
       allowNull: false,

@@ -4,7 +4,7 @@ import Holiday from "../models/Holiday.js";
 function ensureAdmin(req) {
   const role = req.user && req.user.role ? String(req.user.role).toLowerCase() : null;
 
-  if (!role || role !== "admin") {
+  if (!role || (role !== "admin" && role !== "manager")) {
     const error = new Error("Forbidden");
     error.statusCode = 403;
     throw error;
