@@ -50,6 +50,16 @@ const Employee = sequelize.define(
       type: DataTypes.DECIMAL(10, 2),
       allowNull: false,
     },
+    annualLeaveEntitlementDays: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    sickLeaveEntitlementDays: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
     allowances: {
       type: DataTypes.DECIMAL(10, 2),
       defaultValue: 0,

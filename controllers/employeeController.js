@@ -28,6 +28,8 @@ export async function createEmployee(req, res) {
       baseSalary,
       allowances,
       deductions,
+      annualLeaveEntitlementDays,
+      sickLeaveEntitlementDays,
     } = req.body;
 
     if (
@@ -67,6 +69,8 @@ export async function createEmployee(req, res) {
       role,
       image,
       baseSalary,
+      annualLeaveEntitlementDays,
+      sickLeaveEntitlementDays,
     });
 
     res.status(201).json({
@@ -145,6 +149,8 @@ export async function updateEmployee(req, res) {
       baseSalary,
       allowances,
       deductions,
+      annualLeaveEntitlementDays,
+      sickLeaveEntitlementDays,
     } = req.body;
 
     const employee = await Employee.findOne({ where: { employeeId: paramEmployeeId } });
@@ -168,6 +174,8 @@ export async function updateEmployee(req, res) {
       baseSalary,
       allowances,
       deductions,
+      annualLeaveEntitlementDays,
+      sickLeaveEntitlementDays,
     });
 
     res.json({

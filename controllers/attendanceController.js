@@ -15,10 +15,10 @@ function ensureAdmin(req) {
 }
 
 function getPayrollCycleRange(year, month) {
-  // Payroll/attendance cycle: 21st of previous month (inclusive) to 21st of given month (inclusive)
-  const cycleEnd = new Date(year, month - 1, 21);
-  const cycleStart = new Date(cycleEnd);
-  cycleStart.setMonth(cycleStart.getMonth() - 1);
+  // Payroll/attendance cycle: 21st of previous month (inclusive) to 20th of given month (inclusive)
+  // Example: year=2026, month=2 -> 2026-01-21 to 2026-02-20
+  const cycleEnd = new Date(year, month - 1, 20);
+  const cycleStart = new Date(year, month - 2, 21);
 
   return {
     startDate: cycleStart,
@@ -156,8 +156,15 @@ async function calculateWorkingAndOtHours(dateStr, finalStatus, finalDayType, wo
   }
 
   if (isSpecialOtDay) {
+    // On Sundays and Mercantile holidays, employees get double OT for worked hours
+    // and no normal working hours are counted.
     dayWorkingHours = 0;
-    otHours = wh;
+    if (finalDayType === "Sunday" || finalDayType === "MercantileHoliday") {
+      otHours = Number((wh * 2).toFixed(2));
+    } else {
+      // For other special OT days (e.g., public holidays), keep existing behavior
+      otHours = Number(wh.toFixed(2));
+    }
   } else {
     const paidHours = Math.min(wh, standardDayHours);
     const ot = wh > standardDayHours ? wh - standardDayHours : 0;
@@ -215,6 +222,62 @@ export async function recordAttendance(req, res) {
       return;
     }
 
+    const dateOnly = date;
+
+    const existing = await Attendance.findOne({ where: { employeeId, date: dateOnly } });
+
+    // Adjust Annual Leave vs No Pay based on yearly annual leave entitlement.
+    // This logic does NOT apply on Sundays or Mercantile holidays, since
+    // absences on those days should not consume annual leave or cause salary deduction.
+    if (finalDayType !== "Sunday" && finalDayType !== "MercantileHoliday") {
+      const annualEntitlement = Number(employee.annualLeaveEntitlementDays || 0);
+      if (annualEntitlement <= 0) {
+        // No annual leave allocated: any attempted Annual Leave becomes No Pay
+        if (finalStatus === "Annual Leave") {
+          finalStatus = "No Pay";
+        }
+      } else {
+        const parsedDateForYear = new Date(dateOnly);
+        if (Number.isNaN(parsedDateForYear.getTime())) {
+          res.status(400).json({ message: "Invalid date value" });
+          return;
+        }
+
+        const year = parsedDateForYear.getFullYear();
+        const yearStartStr = `${year}-01-01`;
+        const yearEndStr = `${year}-12-31`;
+
+        const whereAnnual = {
+          employeeId,
+          status: "Annual Leave",
+          dayType: {
+            [Op.notIn]: ["Sunday", "MercantileHoliday"],
+          },
+          date: {
+            [Op.between]: [yearStartStr, yearEndStr],
+          },
+        };
+
+        if (existing && existing.id) {
+          whereAnnual.id = { [Op.ne]: existing.id };
+        }
+
+        const annualUsed = await Attendance.count({ where: whereAnnual });
+
+        if (finalStatus === "Annual Leave") {
+          // If entitlement already fully used, treat this as No Pay
+          if (annualUsed >= annualEntitlement) {
+            finalStatus = "No Pay";
+          }
+        } else if (finalStatus === "No Pay") {
+          // If entitlement still available, automatically use Annual Leave instead of No Pay
+          if (annualUsed < annualEntitlement) {
+            finalStatus = "Annual Leave";
+          }
+        }
+      }
+    }
+
     let dayWorkingHours = 0;
     let otHours = 0;
 
@@ -229,7 +292,6 @@ export async function recordAttendance(req, res) {
         return;
       }
 
-      const dateOnly = date;
       try {
         const result = await calculateWorkingAndOtHours(dateOnly, finalStatus, finalDayType, workingHours);
         dayWorkingHours = result.dayWorkingHours;
@@ -239,8 +301,6 @@ export async function recordAttendance(req, res) {
         return;
       }
     }
-
-    const existing = await Attendance.findOne({ where: { employeeId, date } });
 
     let attendance;
     if (existing) {
@@ -335,6 +395,8 @@ export async function uploadAttendanceExcel(req, res) {
     let createdCount = 0;
     let updatedCount = 0;
 
+    const annualEntitlement = Number(employee.annualLeaveEntitlementDays || 0);
+
     for (let i = 1; i < rows.length; i += 1) {
       const row = rows[i];
       if (!row || row.length === 0) continue;
@@ -425,6 +487,55 @@ export async function uploadAttendanceExcel(req, res) {
         }
       }
 
+      // Apply annual leave entitlement logic: convert between Annual Leave and No Pay when needed.
+      // This should not apply on Sundays or Mercantile holidays.
+      if (
+        (payload.status === "Annual Leave" || payload.status === "No Pay") &&
+        payload.dayType !== "Sunday" &&
+        payload.dayType !== "MercantileHoliday"
+      ) {
+        if (annualEntitlement <= 0) {
+          // No annual leave allocated: any attempted Annual Leave becomes No Pay
+          if (payload.status === "Annual Leave") {
+            payload.status = "No Pay";
+          }
+        } else {
+          const parsedDateForYear = new Date(dateStr);
+          if (!Number.isNaN(parsedDateForYear.getTime())) {
+            const year = parsedDateForYear.getFullYear();
+            const yearStartStr = `${year}-01-01`;
+            const yearEndStr = `${year}-12-31`;
+
+            const whereAnnual = {
+              employeeId,
+              status: "Annual Leave",
+              dayType: {
+                [Op.notIn]: ["Sunday", "MercantileHoliday"],
+              },
+              date: {
+                [Op.between]: [yearStartStr, yearEndStr],
+              },
+            };
+
+            if (existing && existing.id) {
+              whereAnnual.id = { [Op.ne]: existing.id };
+            }
+
+            const annualUsed = await Attendance.count({ where: whereAnnual });
+
+            if (payload.status === "Annual Leave") {
+              if (annualUsed >= annualEntitlement) {
+                payload.status = "No Pay";
+              }
+            } else if (payload.status === "No Pay") {
+              if (annualUsed < annualEntitlement) {
+                payload.status = "Annual Leave";
+              }
+            }
+          }
+        }
+      }
+
       if (existing) {
         await existing.update(payload);
         updatedCount += 1;
@@ -480,6 +591,16 @@ export async function getEmployeeMonthlyAttendance(req, res) {
     const endStr = endDate.toISOString().slice(0, 10);
 
     const records = await Attendance.findAll({
+      attributes: [
+        "id",
+        "date",
+        "status",
+        "dayType",
+        "checkInTime",
+        "checkOutTime",
+        "workingHours",
+        "otHours",
+      ],
       where: {
         employeeId,
         date: {
@@ -487,6 +608,35 @@ export async function getEmployeeMonthlyAttendance(req, res) {
         },
       },
       order: [["date", "ASC"]],
+    });
+
+    // Yearly annual and sick leave usage for the selected year (calendar year)
+    const yearStartStr = `${year}-01-01`;
+    const yearEndStr = `${year}-12-31`;
+
+    const yearlyAnnualLeaveDays = await Attendance.count({
+      where: {
+        employeeId,
+        status: "Annual Leave",
+        dayType: {
+          [Op.notIn]: ["Sunday", "MercantileHoliday"],
+        },
+        date: {
+          [Op.between]: [yearStartStr, yearEndStr],
+        },
+      },
+    });
+    const yearlySickLeaveDays = await Attendance.count({
+      where: {
+        employeeId,
+        status: "Sick Leave",
+        dayType: {
+          [Op.notIn]: ["Sunday", "MercantileHoliday"],
+        },
+        date: {
+          [Op.between]: [yearStartStr, yearEndStr],
+        },
+      },
     });
 
     let totalWorkingHours = 0;
@@ -498,6 +648,12 @@ export async function getEmployeeMonthlyAttendance(req, res) {
     records.forEach((rec) => {
       totalWorkingHours += Number(rec.workingHours || 0);
       totalOtHours += Number(rec.otHours || 0);
+
+      // On Sundays and Mercantile holidays, absences should not
+      // be treated as paid leave or no-pay deductions.
+      if (rec.dayType === "Sunday" || rec.dayType === "MercantileHoliday") {
+        return;
+      }
 
       if (rec.status === "Annual Leave") {
         annualLeaveDays += 1;
@@ -511,12 +667,30 @@ export async function getEmployeeMonthlyAttendance(req, res) {
     totalWorkingHours = Number(totalWorkingHours.toFixed(2));
     totalOtHours = Number(totalOtHours.toFixed(2));
 
+    const simplifiedRecords = records.map((rec) => ({
+      id: rec.id,
+      date: rec.date,
+      status: rec.status,
+      dayType: rec.dayType,
+      checkInTime: rec.checkInTime,
+      checkOutTime: rec.checkOutTime,
+      workingHours: rec.workingHours,
+      otHours: rec.otHours,
+    }));
+
+    const annualEntitlement = Number(employee.annualLeaveEntitlementDays || 0);
+    const sickEntitlement = Number(employee.sickLeaveEntitlementDays || 0);
+    const remainingAnnualLeave = Math.max(annualEntitlement - yearlyAnnualLeaveDays, 0);
+    const remainingSickLeave = Math.max(sickEntitlement - yearlySickLeaveDays, 0);
+
     const summary = {
       employee: {
         employeeId: employee.employeeId,
         firstName: employee.firstName,
         lastName: employee.lastName,
         baseSalary: employee.baseSalary,
+        annualLeaveEntitlementDays: annualEntitlement,
+        sickLeaveEntitlementDays: sickEntitlement,
       },
       period: {
         year,
@@ -531,7 +705,19 @@ export async function getEmployeeMonthlyAttendance(req, res) {
         sickLeaveDays,
         noPayDays,
       },
-      records,
+      records: simplifiedRecords,
+      annualLeaveSummary: {
+        year,
+        entitlementDays: annualEntitlement,
+        takenDays: yearlyAnnualLeaveDays,
+        remainingDays: remainingAnnualLeave,
+      },
+      sickLeaveSummary: {
+        year,
+        entitlementDays: sickEntitlement,
+        takenDays: yearlySickLeaveDays,
+        remainingDays: remainingSickLeave,
+      },
     };
 
     res.json(summary);
@@ -553,6 +739,9 @@ export async function getAllEmployeesLeaveSummary(req, res) {
     const where = {
       status: {
         [Op.in]: ["Annual Leave", "Sick Leave", "No Pay"],
+      },
+      dayType: {
+        [Op.notIn]: ["Sunday", "MercantileHoliday"],
       },
     };
 
@@ -651,6 +840,9 @@ export async function getSingleEmployeeLeaveSummary(req, res) {
       employeeId,
       status: {
         [Op.in]: ["Annual Leave", "Sick Leave", "No Pay"],
+      },
+      dayType: {
+        [Op.notIn]: ["Sunday", "MercantileHoliday"],
       },
     };
 

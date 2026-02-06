@@ -15,10 +15,10 @@ function ensureAdmin(req) {
 }
 
 function getPayrollCycleRange(year, month) {
-  // Payroll cycle: 21st of previous month (inclusive) to 21st of given month (inclusive)
-  const cycleEnd = new Date(year, month - 1, 21);
-  const cycleStart = new Date(cycleEnd);
-  cycleStart.setMonth(cycleStart.getMonth() - 1);
+  // Payroll cycle: 21st of previous month (inclusive) to 20th of given month (inclusive)
+  // Example: year=2026, month=2 -> 2026-01-21 to 2026-02-20
+  const cycleEnd = new Date(year, month - 1, 20);
+  const cycleStart = new Date(year, month - 2, 21);
 
   return {
     startDate: cycleStart,
